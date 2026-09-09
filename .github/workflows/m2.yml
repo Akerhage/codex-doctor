@@ -1,0 +1,27 @@
+name: M2 checks
+
+on:
+  pull_request:
+  push:
+    branches:
+      - feat/m2-readonly-diagnostics
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+          cache: npm
+      - name: Install locked dependencies
+        run: npm ci --ignore-scripts --no-audit --no-fund
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Build
+        run: npm run build
