@@ -15,21 +15,23 @@ type DiagnosticStatus = 'healthy' | 'warning' | 'failed' | 'unknown' | 'unavaila
 type Observation = { id: string; label: string; status: DiagnosticStatus; detail: string };
 type Installation = { source: 'appx' | 'uninstall-registry'; identity: string; version: string | null; installLocation: string };
 type OwnedProcess = { pid: number; parentPid: number; name: string; executablePath: string; matchedInstallLocation: string };
+type InstallationState = 'detected' | 'not-detected' | 'unavailable' | 'error';
+type ProcessState = 'detected' | 'none' | 'unavailable' | 'error';
 
 type DiagnosticSnapshot =
   | { source: 'mock'; collectedAt: string; observations: Observation[] }
   | {
       source: 'windows-readonly';
       collectedAt: string;
-      installation: { state: 'detected' | 'not-detected' | 'unavailable' | 'error'; candidates: Installation[]; detail: string };
-      processes: { state: 'detected' | 'none' | 'unavailable' | 'error'; items: OwnedProcess[]; detail: string };
+      installation: { state: InstallationState; candidates: Installation[]; detail: string };
+      processes: { state: ProcessState; items: OwnedProcess[]; detail: string };
       activeJobState: 'unknown';
       observations: Observation[];
     };
 
 const statuses: readonly DiagnosticStatus[] = ['healthy', 'warning', 'failed', 'unknown', 'unavailable', 'mock'];
-const installationStates = ['detected', 'not-detected', 'unavailable', 'error'] as const;
-const processStates = ['detected', 'none', 'unavailable', 'error'] as const;
+const installationStates: readonly InstallationState[] = ['detected', 'not-detected', 'unavailable', 'error'];
+const processStates: readonly ProcessState[] = ['detected', 'none', 'unavailable', 'error'];
 
 const isRecord = (value: unknown): value is Record<string, unknown> =>
   typeof value === 'object' && value !== null && !Array.isArray(value);
@@ -85,7 +87,7 @@ const parseSnapshotResult = (value: unknown): Result<DiagnosticSnapshot> => {
   if (data.source !== 'windows-readonly' || !isRecord(data.installation) || !isRecord(data.processes) || data.activeJobState !== 'unknown') {
     return { ok: false, error: { code: 'INVALID_SNAPSHOT_PAYLOAD', message: 'Diagnostic response failed validation.' } };
   }
-  if (!installationStates.includes(data.installation.state as typeof installationStates[number]) || !processStates.includes(data.processes.state as typeof processStates[number])) {
+  if (!installationStates.includes(data.installation.state as InstallationState) || !processStates.includes(data.processes.state as ProcessState)) {
     return { ok: false, error: { code: 'INVALID_SNAPSHOT_PAYLOAD', message: 'Diagnostic response failed validation.' } };
   }
   if (!isString(data.installation.detail) || !isString(data.processes.detail) || !Array.isArray(data.installation.candidates) || !Array.isArray(data.processes.items)) {
@@ -108,11 +110,11 @@ const parseSnapshotResult = (value: unknown): Result<DiagnosticSnapshot> => {
   return { ok: true, data: {
     source: 'windows-readonly',
     collectedAt: data.collectedAt,
-    installation: { state: data.installation.state as DiagnosticSnapshot & never, candidates: candidates as Installation[], detail: data.installation.detail },
-    processes: { state: data.processes.state as DiagnosticSnapshot & never, items: processes as OwnedProcess[], detail: data.processes.detail },
+    installation: { state: data.installation.state as InstallationState, candidates: candidates as Installation[], detail: data.installation.detail },
+    processes: { state: data.processes.state as ProcessState, items: processes as OwnedProcess[], detail: data.processes.detail },
     activeJobState: 'unknown',
     observations
-  } as DiagnosticSnapshot };
+  } };
 };
 
 contextBridge.exposeInMainWorld('doctor', {
