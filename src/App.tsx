@@ -8,6 +8,13 @@ type LoadState =
   | { status: 'ready'; environment: EnvironmentInfo; snapshot: DiagnosticSnapshot }
   | { status: 'error'; message: string };
 
+type ProcessDelta = {
+  previousCollectedAt: string;
+  currentCollectedAt: string;
+  startedPids: number[];
+  stoppedPids: number[];
+};
+
 const pageLabels: Record<Page, string> = {
   dashboard: 'Dashboard',
   diagnostics: 'Diagnostics',
@@ -22,6 +29,18 @@ const statusLabel: Record<DiagnosticObservation['status'], string> = {
   unknown: 'Unknown',
   unavailable: 'Unavailable',
   mock: 'Mock'
+};
+
+const compareProcessSets = (previous: WindowsDiagnosticSnapshot, current: WindowsDiagnosticSnapshot): ProcessDelta => {
+  const previousPids = new Set(previous.processes.items.map((process) => process.pid));
+  const currentPids = new Set(current.processes.items.map((process) => process.pid));
+
+  return {
+    previousCollectedAt: previous.collectedAt,
+    currentCollectedAt: current.collectedAt,
+    startedPids: [...currentPids].filter((pid) => !previousPids.has(pid)).sort((a, b) => a - b),
+    stoppedPids: [...previousPids].filter((pid) => !currentPids.has(pid)).sort((a, b) => a - b)
+  };
 };
 
 function ObservationCard({ observation }: { observation: DiagnosticObservation }) {
@@ -93,7 +112,36 @@ function Dashboard({ environment, snapshot }: { environment: EnvironmentInfo; sn
   );
 }
 
-function LiveEvidence({ snapshot }: { snapshot: WindowsDiagnosticSnapshot }) {
+function ProcessDeltaPanel({ delta }: { delta: ProcessDelta }) {
+  const unchanged = delta.startedPids.length === 0 && delta.stoppedPids.length === 0;
+
+  return (
+    <section className="process-delta" aria-label="Process set delta">
+      <div>
+        <div className="eyebrow">Since previous scan</div>
+        <h3>{unchanged ? 'No PID-set change observed' : 'PID-set change observed'}</h3>
+        <p>
+          This compares only process identifiers between two Doctor snapshots. It does not establish task activity, task completion, process health or recovery safety.
+        </p>
+      </div>
+      <div className="process-delta__counts">
+        <span><strong>{delta.startedPids.length}</strong> appeared</span>
+        <span><strong>{delta.stoppedPids.length}</strong> disappeared</span>
+      </div>
+      {!unchanged && (
+        <div className="process-delta__detail">
+          {delta.startedPids.length > 0 && <code>Appeared: {delta.startedPids.join(', ')}</code>}
+          {delta.stoppedPids.length > 0 && <code>Disappeared: {delta.stoppedPids.join(', ')}</code>}
+        </div>
+      )}
+      <small>
+        Compared {new Date(delta.previousCollectedAt).toLocaleTimeString()} → {new Date(delta.currentCollectedAt).toLocaleTimeString()}
+      </small>
+    </section>
+  );
+}
+
+function LiveEvidence({ snapshot, processDelta }: { snapshot: WindowsDiagnosticSnapshot; processDelta: ProcessDelta | null }) {
   return (
     <>
       <div className="notice notice--neutral">
@@ -130,27 +178,64 @@ function LiveEvidence({ snapshot }: { snapshot: WindowsDiagnosticSnapshot }) {
             <div className="eyebrow">Owned process evidence</div>
             <h2>{snapshot.processes.state}</h2>
           </div>
+          {snapshot.processes.state === 'detected' && (
+            <span className="source-pill">{snapshot.processes.items.length} PROCESSES</span>
+          )}
         </div>
         <p>{snapshot.processes.detail}</p>
         {snapshot.processes.items.length === 0 ? (
           <div className="state-panel state-panel--compact">No process has been proven Codex-owned.</div>
         ) : (
-          <div className="detail-grid">
-            {snapshot.processes.items.map((process) => (
-              <div className="detail-card detail-card--wide" key={process.pid}>
-                <span>PID {process.pid} · parent {process.parentPid}</span>
-                <strong>{process.name}</strong>
-                <code>{process.executablePath}</code>
-              </div>
-            ))}
+          <div className="process-table-wrap">
+            <table className="process-table">
+              <thead>
+                <tr>
+                  <th scope="col">PID</th>
+                  <th scope="col">Parent</th>
+                  <th scope="col">Process</th>
+                  <th scope="col">Executable evidence</th>
+                </tr>
+              </thead>
+              <tbody>
+                {snapshot.processes.items.map((process) => (
+                  <tr key={process.pid}>
+                    <td><code>{process.pid}</code></td>
+                    <td><code>{process.parentPid}</code></td>
+                    <td><strong>{process.name}</strong></td>
+                    <td>
+                      <details className="path-evidence">
+                        <summary>Show verified path</summary>
+                        <code>{process.executablePath}</code>
+                      </details>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
           </div>
         )}
       </section>
+
+      {processDelta && <ProcessDeltaPanel delta={processDelta} />}
     </>
   );
 }
 
-function Diagnostics({ environment, snapshot }: { environment: EnvironmentInfo; snapshot: DiagnosticSnapshot }) {
+function Diagnostics({
+  environment,
+  snapshot,
+  refreshing,
+  refreshError,
+  processDelta,
+  onRefresh
+}: {
+  environment: EnvironmentInfo;
+  snapshot: DiagnosticSnapshot;
+  refreshing: boolean;
+  refreshError: string | null;
+  processDelta: ProcessDelta | null;
+  onRefresh: () => void;
+}) {
   return (
     <section className="section-block">
       <div className="section-heading">
@@ -158,6 +243,9 @@ function Diagnostics({ environment, snapshot }: { environment: EnvironmentInfo; 
           <div className="eyebrow">Read-only diagnostics</div>
           <h2>Diagnostics</h2>
         </div>
+        <button className="diagnostic-refresh" type="button" onClick={onRefresh} disabled={refreshing}>
+          {refreshing ? 'Refreshing…' : 'Refresh evidence'}
+        </button>
       </div>
       <div className="detail-grid">
         <div className="detail-card">
@@ -171,8 +259,10 @@ function Diagnostics({ environment, snapshot }: { environment: EnvironmentInfo; 
         </div>
       </div>
 
+      {refreshError && <div className="notice notice--warning">Refresh failed: {refreshError}. Existing evidence has been retained.</div>}
+
       {snapshot.source === 'windows-readonly' ? (
-        <LiveEvidence snapshot={snapshot} />
+        <LiveEvidence snapshot={snapshot} processDelta={processDelta} />
       ) : (
         <div className="notice notice--warning">Live Windows diagnostics are unavailable; this snapshot is mock data.</div>
       )}
@@ -231,6 +321,9 @@ function Settings() {
 export function App() {
   const [page, setPage] = useState<Page>('dashboard');
   const [loadState, setLoadState] = useState<LoadState>({ status: 'loading' });
+  const [refreshing, setRefreshing] = useState(false);
+  const [refreshError, setRefreshError] = useState<string | null>(null);
+  const [processDelta, setProcessDelta] = useState<ProcessDelta | null>(null);
 
   useEffect(() => {
     let cancelled = false;
@@ -262,6 +355,34 @@ export function App() {
     return () => { cancelled = true; };
   }, []);
 
+  const refreshDiagnostics = async () => {
+    if (loadState.status !== 'ready' || refreshing) return;
+
+    setRefreshing(true);
+    setRefreshError(null);
+
+    try {
+      const result = await window.doctor.getDiagnosticSnapshot();
+      if (!result.ok) {
+        setRefreshError(result.error.message);
+        return;
+      }
+
+      const previousSnapshot = loadState.snapshot;
+      if (previousSnapshot.source === 'windows-readonly' && result.data.source === 'windows-readonly') {
+        setProcessDelta(compareProcessSets(previousSnapshot, result.data));
+      } else {
+        setProcessDelta(null);
+      }
+
+      setLoadState({ status: 'ready', environment: loadState.environment, snapshot: result.data });
+    } catch {
+      setRefreshError('Unable to reach the Codex Doctor preload API');
+    } finally {
+      setRefreshing(false);
+    }
+  };
+
   const content = useMemo(() => {
     if (loadState.status === 'loading') {
       return <div className="state-panel">Collecting bounded read-only diagnostics…</div>;
@@ -271,10 +392,21 @@ export function App() {
     }
 
     if (page === 'dashboard') return <Dashboard environment={loadState.environment} snapshot={loadState.snapshot} />;
-    if (page === 'diagnostics') return <Diagnostics environment={loadState.environment} snapshot={loadState.snapshot} />;
+    if (page === 'diagnostics') {
+      return (
+        <Diagnostics
+          environment={loadState.environment}
+          snapshot={loadState.snapshot}
+          refreshing={refreshing}
+          refreshError={refreshError}
+          processDelta={processDelta}
+          onRefresh={() => { void refreshDiagnostics(); }}
+        />
+      );
+    }
     if (page === 'recovery') return <Recovery />;
     return <Settings />;
-  }, [loadState, page]);
+  }, [loadState, page, processDelta, refreshError, refreshing]);
 
   return (
     <div className="app-shell">
