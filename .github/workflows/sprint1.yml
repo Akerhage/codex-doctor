@@ -1,0 +1,26 @@
+name: Sprint 1 checks
+
+on:
+  pull_request:
+  push:
+    branches:
+      - feat/sprint-1-shell
+
+jobs:
+  validate:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 26
+      - name: Install dependencies for validation
+        run: npm install --ignore-scripts --no-audit --no-fund
+      - name: Typecheck
+        run: npm run typecheck
+      - name: Unit tests
+        run: npm test
+      - name: Build
+        run: npm run build
