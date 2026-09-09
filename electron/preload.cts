@@ -72,25 +72,36 @@ const parseEnvironmentResult = (value: unknown): Result<EnvironmentInfo> => {
 };
 
 const parseSnapshotResult = (value: unknown): Result<DiagnosticSnapshot> => {
-  if (!isRecord(value) || value.ok !== true || !isRecord(value.data) || !isString(value.data.collectedAt) || Number.isNaN(Date.parse(value.data.collectedAt))) {
+  if (!isRecord(value) || value.ok !== true || !isRecord(value.data)) {
     return { ok: false, error: { code: 'INVALID_SNAPSHOT_PAYLOAD', message: 'Diagnostic response failed validation.' } };
   }
 
   const data = value.data;
+  const collectedAt = data.collectedAt;
+  if (!isString(collectedAt) || Number.isNaN(Date.parse(collectedAt))) {
+    return { ok: false, error: { code: 'INVALID_SNAPSHOT_PAYLOAD', message: 'Diagnostic response failed validation.' } };
+  }
+
   const observations = parseObservations(data.observations);
   if (!observations) return { ok: false, error: { code: 'INVALID_SNAPSHOT_PAYLOAD', message: 'Diagnostic response failed validation.' } };
 
   if (data.source === 'mock') {
-    return { ok: true, data: { source: 'mock', collectedAt: data.collectedAt, observations } };
+    return { ok: true, data: { source: 'mock', collectedAt, observations } };
   }
 
   if (data.source !== 'windows-readonly' || !isRecord(data.installation) || !isRecord(data.processes) || data.activeJobState !== 'unknown') {
     return { ok: false, error: { code: 'INVALID_SNAPSHOT_PAYLOAD', message: 'Diagnostic response failed validation.' } };
   }
-  if (!installationStates.includes(data.installation.state as InstallationState) || !processStates.includes(data.processes.state as ProcessState)) {
+
+  const installationState = data.installation.state;
+  const processState = data.processes.state;
+  const installationDetail = data.installation.detail;
+  const processDetail = data.processes.detail;
+
+  if (!isString(installationState) || !installationStates.includes(installationState as InstallationState) || !isString(processState) || !processStates.includes(processState as ProcessState)) {
     return { ok: false, error: { code: 'INVALID_SNAPSHOT_PAYLOAD', message: 'Diagnostic response failed validation.' } };
   }
-  if (!isString(data.installation.detail) || !isString(data.processes.detail) || !Array.isArray(data.installation.candidates) || !Array.isArray(data.processes.items)) {
+  if (!isString(installationDetail) || !isString(processDetail) || !Array.isArray(data.installation.candidates) || !Array.isArray(data.processes.items)) {
     return { ok: false, error: { code: 'INVALID_SNAPSHOT_PAYLOAD', message: 'Diagnostic response failed validation.' } };
   }
 
@@ -109,9 +120,9 @@ const parseSnapshotResult = (value: unknown): Result<DiagnosticSnapshot> => {
 
   return { ok: true, data: {
     source: 'windows-readonly',
-    collectedAt: data.collectedAt,
-    installation: { state: data.installation.state as InstallationState, candidates: candidates as Installation[], detail: data.installation.detail },
-    processes: { state: data.processes.state as ProcessState, items: processes as OwnedProcess[], detail: data.processes.detail },
+    collectedAt,
+    installation: { state: installationState as InstallationState, candidates: candidates as Installation[], detail: installationDetail },
+    processes: { state: processState as ProcessState, items: processes as OwnedProcess[], detail: processDetail },
     activeJobState: 'unknown',
     observations
   } };
