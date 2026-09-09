@@ -1,0 +1,22 @@
+name: Foundation checks
+on:
+  pull_request:
+  push:
+    branches: [main]
+jobs:
+  validate:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+      - name: Validate JSON and required documents
+        shell: python
+        run: |
+          import json
+          from pathlib import Path
+          json.loads(Path('config/doctor.config.json').read_text(encoding='utf-8'))
+          required = ['README.md', 'CLAUDE.md', 'docs/PROJECT_BIBLE.md', 'docs/ARCHITECTURE.md', 'docs/BUILD_SPEC_SPRINT1.md', 'docs/IPC_CONTRACT.md', 'docs/UI_GUIDELINES.md']
+          for name in required:
+              assert Path(name).read_text(encoding='utf-8').strip(), name
+          print('Foundation validation passed')

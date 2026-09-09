@@ -1,0 +1,7 @@
+{
+  "schemaVersion": 1,
+  "application": "Codex Doctor",
+  "diagnostics": { "mode": "read-only" },
+  "recovery": { "enabled": false },
+  "watchdog": { "enabled": false, "automaticRecovery": false }
+}
