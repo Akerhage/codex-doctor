@@ -1,5 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import type { DiagnosticObservation, DiagnosticSnapshot, EnvironmentInfo, WindowsDiagnosticSnapshot } from './shared/contracts';
+import { compareProcessSets, type ProcessDelta } from './shared/process-delta';
 
 type Page = 'dashboard' | 'diagnostics' | 'recovery' | 'settings';
 
@@ -7,13 +8,6 @@ type LoadState =
   | { status: 'loading' }
   | { status: 'ready'; environment: EnvironmentInfo; snapshot: DiagnosticSnapshot }
   | { status: 'error'; message: string };
-
-type ProcessDelta = {
-  previousCollectedAt: string;
-  currentCollectedAt: string;
-  startedPids: number[];
-  stoppedPids: number[];
-};
 
 const pageLabels: Record<Page, string> = {
   dashboard: 'Dashboard',
@@ -29,18 +23,6 @@ const statusLabel: Record<DiagnosticObservation['status'], string> = {
   unknown: 'Unknown',
   unavailable: 'Unavailable',
   mock: 'Mock'
-};
-
-const compareProcessSets = (previous: WindowsDiagnosticSnapshot, current: WindowsDiagnosticSnapshot): ProcessDelta => {
-  const previousPids = new Set(previous.processes.items.map((process) => process.pid));
-  const currentPids = new Set(current.processes.items.map((process) => process.pid));
-
-  return {
-    previousCollectedAt: previous.collectedAt,
-    currentCollectedAt: current.collectedAt,
-    startedPids: [...currentPids].filter((pid) => !previousPids.has(pid)).sort((a, b) => a - b),
-    stoppedPids: [...previousPids].filter((pid) => !currentPids.has(pid)).sort((a, b) => a - b)
-  };
 };
 
 function ObservationCard({ observation }: { observation: DiagnosticObservation }) {
