@@ -1,5 +1,6 @@
 import { app, ipcMain } from 'electron';
-import type { DiagnosticSnapshot, EnvironmentInfo, Result } from '../../src/shared/contracts.js';
+import type { DiagnosticSnapshot, EnvironmentInfo, MockDiagnosticSnapshot, Result } from '../../src/shared/contracts.js';
+import { collectWindowsDiagnostics } from '../services/windows-diagnostics.js';
 
 const ok = <T>(data: T): Result<T> => ({ ok: true, data });
 
@@ -17,7 +18,7 @@ export const registerIpcHandlers = (): void => {
     });
   });
 
-  ipcMain.handle('doctor:get-mock-snapshot', (): Result<DiagnosticSnapshot> => {
+  ipcMain.handle('doctor:get-mock-snapshot', (): Result<MockDiagnosticSnapshot> => {
     return ok({
       source: 'mock',
       collectedAt: new Date().toISOString(),
@@ -26,21 +27,25 @@ export const registerIpcHandlers = (): void => {
           id: 'desktop-ui',
           label: 'Codex Desktop UI',
           status: 'mock',
-          detail: 'Mock observation only. Real process discovery is not implemented.'
+          detail: 'Mock observation only. Live Windows diagnostics are available through the M2 collector.'
         },
         {
           id: 'active-job',
           label: 'Active job state',
           status: 'unknown',
-          detail: 'Doctor cannot yet verify whether Codex has an active task.'
+          detail: 'Doctor does not infer active work from process presence.'
         },
         {
           id: 'recovery',
           label: 'Recovery engine',
           status: 'unavailable',
-          detail: 'Recovery actions are intentionally disabled in Sprint 1.'
+          detail: 'Recovery actions remain intentionally disabled in M2.'
         }
       ]
     });
+  });
+
+  ipcMain.handle('doctor:get-diagnostic-snapshot', async (): Promise<Result<DiagnosticSnapshot>> => {
+    return ok(await collectWindowsDiagnostics());
   });
 };
