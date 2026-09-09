@@ -1,4 +1,4 @@
-import type { WindowsDiagnosticSnapshot } from './contracts';
+import type { WindowsDiagnosticSnapshot } from './contracts.js';
 
 export interface ProcessDelta {
   previousCollectedAt: string;
