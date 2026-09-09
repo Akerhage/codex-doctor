@@ -15,7 +15,7 @@ const createMainWindow = async (): Promise<void> => {
     backgroundColor: '#071019',
     show: false,
     webPreferences: {
-      preload: path.join(__dirname, 'preload.js'),
+      preload: path.join(__dirname, 'preload.cjs'),
       contextIsolation: true,
       nodeIntegration: false,
       sandbox: true
@@ -38,7 +38,7 @@ const createMainWindow = async (): Promise<void> => {
   if (devUrl) {
     await window.loadURL(devUrl);
   } else {
-    await window.loadFile(path.join(__dirname, '..', 'dist', 'index.html'));
+    await window.loadFile(path.join(__dirname, '..', '..', 'dist', 'index.html'));
   }
 };
 
