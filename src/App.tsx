@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useState } from 'react';
-import type { DiagnosticObservation, DiagnosticSnapshot, EnvironmentInfo } from './shared/contracts';
+import type { DiagnosticObservation, DiagnosticSnapshot, EnvironmentInfo, WindowsDiagnosticSnapshot } from './shared/contracts';
 
 type Page = 'dashboard' | 'diagnostics' | 'recovery' | 'settings';
 
@@ -16,7 +16,7 @@ const pageLabels: Record<Page, string> = {
 };
 
 const statusLabel: Record<DiagnosticObservation['status'], string> = {
-  healthy: 'Healthy',
+  healthy: 'Detected',
   warning: 'Warning',
   failed: 'Failed',
   unknown: 'Unknown',
@@ -39,14 +39,18 @@ function ObservationCard({ observation }: { observation: DiagnosticObservation }
 }
 
 function Dashboard({ environment, snapshot }: { environment: EnvironmentInfo; snapshot: DiagnosticSnapshot }) {
+  const live = snapshot.source === 'windows-readonly';
+
   return (
     <>
       <section className="hero-panel">
         <div>
-          <div className="eyebrow">Nightingale · Sprint 1</div>
+          <div className="eyebrow">Nightingale · M2</div>
           <h2>Diagnostic workspace</h2>
           <p>
-            This build is intentionally read-only. All Codex observations below are mock data until the diagnostics adapter is implemented.
+            {live
+              ? 'Codex Doctor is collecting bounded Windows installation and process evidence in read-only mode. Active task state remains unknown.'
+              : 'This diagnostic snapshot is mock data. No live Codex evidence is represented by this view.'}
           </p>
         </div>
         <div className="hero-panel__meta">
@@ -80,10 +84,67 @@ function Dashboard({ environment, snapshot }: { environment: EnvironmentInfo; sn
         <div className="timeline-row">
           <span className="timeline-dot" aria-hidden="true" />
           <div>
-            <strong>Mock diagnostic snapshot collected</strong>
+            <strong>{live ? 'Read-only Windows snapshot collected' : 'Mock diagnostic snapshot collected'}</strong>
             <p>{new Date(snapshot.collectedAt).toLocaleString()}</p>
           </div>
         </div>
+      </section>
+    </>
+  );
+}
+
+function LiveEvidence({ snapshot }: { snapshot: WindowsDiagnosticSnapshot }) {
+  return (
+    <>
+      <div className="notice notice--neutral">
+        Ownership is accepted only when a process executable path is contained by a Codex installation root discovered from Windows metadata. Process name alone is ignored. Command lines and conversation data are not collected.
+      </div>
+
+      <section className="section-block section-block--nested">
+        <div className="section-heading">
+          <div>
+            <div className="eyebrow">Installation evidence</div>
+            <h2>{snapshot.installation.state}</h2>
+          </div>
+        </div>
+        <p>{snapshot.installation.detail}</p>
+        {snapshot.installation.candidates.length === 0 ? (
+          <div className="state-panel state-panel--compact">No installation candidate accepted.</div>
+        ) : (
+          <div className="detail-grid">
+            {snapshot.installation.candidates.map((candidate) => (
+              <div className="detail-card detail-card--wide" key={`${candidate.source}:${candidate.installLocation}`}>
+                <span>{candidate.source}</span>
+                <strong>{candidate.identity}</strong>
+                <small>{candidate.version ?? 'Version unavailable'}</small>
+                <code>{candidate.installLocation}</code>
+              </div>
+            ))}
+          </div>
+        )}
+      </section>
+
+      <section className="section-block section-block--nested">
+        <div className="section-heading">
+          <div>
+            <div className="eyebrow">Owned process evidence</div>
+            <h2>{snapshot.processes.state}</h2>
+          </div>
+        </div>
+        <p>{snapshot.processes.detail}</p>
+        {snapshot.processes.items.length === 0 ? (
+          <div className="state-panel state-panel--compact">No process has been proven Codex-owned.</div>
+        ) : (
+          <div className="detail-grid">
+            {snapshot.processes.items.map((process) => (
+              <div className="detail-card detail-card--wide" key={process.pid}>
+                <span>PID {process.pid} · parent {process.parentPid}</span>
+                <strong>{process.name}</strong>
+                <code>{process.executablePath}</code>
+              </div>
+            ))}
+          </div>
+        )}
       </section>
     </>
   );
@@ -94,7 +155,7 @@ function Diagnostics({ environment, snapshot }: { environment: EnvironmentInfo; 
     <section className="section-block">
       <div className="section-heading">
         <div>
-          <div className="eyebrow">Read-only foundation</div>
+          <div className="eyebrow">Read-only diagnostics</div>
           <h2>Diagnostics</h2>
         </div>
       </div>
@@ -109,14 +170,12 @@ function Diagnostics({ environment, snapshot }: { environment: EnvironmentInfo; 
           <span>Node</span><strong>{environment.runtime.node}</strong>
         </div>
       </div>
-      <div className="notice notice--neutral">
-        Real Codex installation discovery, process ownership and Windows event collection are not implemented in this sprint.
-      </div>
-      <div className="observation-grid observation-grid--single">
-        {snapshot.observations.map((observation) => (
-          <ObservationCard key={observation.id} observation={observation} />
-        ))}
-      </div>
+
+      {snapshot.source === 'windows-readonly' ? (
+        <LiveEvidence snapshot={snapshot} />
+      ) : (
+        <div className="notice notice--warning">Live Windows diagnostics are unavailable; this snapshot is mock data.</div>
+      )}
     </section>
   );
 }
@@ -131,12 +190,12 @@ function Recovery() {
         </div>
       </div>
       <div className="notice notice--warning">
-        Recovery actions are intentionally disabled. Codex Doctor will not restart processes, clear caches, alter sessions or modify internal state in Sprint 1.
+        Recovery actions are intentionally disabled. M2 observes bounded metadata only and will not restart processes, clear caches, alter sessions or modify Codex state.
       </div>
       <div className="recovery-placeholder">
         <div className="recovery-placeholder__icon">+</div>
         <h3>No executable repairs</h3>
-        <p>Future operations require version-aware target validation, active-job safety checks, backup where applicable, explicit confirmation and verification.</p>
+        <p>Recovery remains a separate future milestone requiring version-aware target validation, active-job safety checks, backup where applicable, explicit confirmation and verification.</p>
       </div>
     </section>
   );
@@ -154,7 +213,7 @@ function Settings() {
       <div className="settings-card">
         <div>
           <strong>Diagnostic mode</strong>
-          <p>Read-only</p>
+          <p>Read-only Windows metadata</p>
         </div>
         <span className="status-badge status-badge--healthy">Locked</span>
       </div>
@@ -180,7 +239,7 @@ export function App() {
       try {
         const [environmentResult, snapshotResult] = await Promise.all([
           window.doctor.getEnvironment(),
-          window.doctor.getMockSnapshot()
+          window.doctor.getDiagnosticSnapshot()
         ]);
 
         if (cancelled) return;
@@ -205,7 +264,7 @@ export function App() {
 
   const content = useMemo(() => {
     if (loadState.status === 'loading') {
-      return <div className="state-panel">Loading Codex Doctor foundation…</div>;
+      return <div className="state-panel">Collecting bounded read-only diagnostics…</div>;
     }
     if (loadState.status === 'error') {
       return <div className="state-panel state-panel--error">{loadState.message}</div>;
@@ -244,7 +303,7 @@ export function App() {
 
         <div className="sidebar-footer">
           <span className="status-dot" aria-hidden="true" />
-          Read-only foundation
+          Read-only diagnostics
         </div>
       </aside>
 
