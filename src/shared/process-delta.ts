@@ -7,10 +7,17 @@ export interface ProcessDelta {
   stoppedPids: number[];
 }
 
+const isComparableProcessState = (state: WindowsDiagnosticSnapshot['processes']['state']): boolean =>
+  state === 'detected' || state === 'none';
+
 export const compareProcessSets = (
   previous: WindowsDiagnosticSnapshot,
   current: WindowsDiagnosticSnapshot
-): ProcessDelta => {
+): ProcessDelta | null => {
+  if (!isComparableProcessState(previous.processes.state) || !isComparableProcessState(current.processes.state)) {
+    return null;
+  }
+
   const previousPids = new Set(previous.processes.items.map((process) => process.pid));
   const currentPids = new Set(current.processes.items.map((process) => process.pid));
 

@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import { isPathWithinRoot } from '../electron/services/windows-diagnostics';
 import { compareProcessSets } from '../src/shared/process-delta';
 import { parseSnapshotResult } from '../src/shared/validation';
-import type { WindowsDiagnosticSnapshot } from '../src/shared/contracts';
+import type { ProcessEvidenceState, WindowsDiagnosticSnapshot } from '../src/shared/contracts';
 
 describe('isPathWithinRoot', () => {
   it('accepts a process path inside the discovered installation root', () => {
@@ -73,13 +73,17 @@ describe('parseSnapshotResult M2', () => {
 });
 
 describe('compareProcessSets', () => {
-  const makeSnapshot = (collectedAt: string, pids: number[]): WindowsDiagnosticSnapshot => ({
+  const makeSnapshot = (
+    collectedAt: string,
+    pids: number[],
+    processState: ProcessEvidenceState = pids.length > 0 ? 'detected' : 'none'
+  ): WindowsDiagnosticSnapshot => ({
     source: 'windows-readonly',
     collectedAt,
     installation: {
-      state: 'detected',
-      detail: 'Detected.',
-      candidates: [{
+      state: processState === 'error' ? 'error' : 'detected',
+      detail: 'Observed.',
+      candidates: processState === 'error' ? [] : [{
         source: 'appx',
         identity: 'OpenAI.Codex',
         version: '1.2.3',
@@ -87,7 +91,7 @@ describe('compareProcessSets', () => {
       }]
     },
     processes: {
-      state: pids.length > 0 ? 'detected' : 'none',
+      state: processState,
       detail: 'Observed.',
       items: pids.map((pid) => ({
         pid,
@@ -116,8 +120,38 @@ describe('compareProcessSets', () => {
   it('reports an unchanged PID set as an empty delta', () => {
     const previous = makeSnapshot('2026-09-09T12:00:00.000Z', [10, 20]);
     const current = makeSnapshot('2026-09-09T12:01:00.000Z', [20, 10]);
+    const delta = compareProcessSets(previous, current);
 
-    expect(compareProcessSets(previous, current).startedPids).toEqual([]);
-    expect(compareProcessSets(previous, current).stoppedPids).toEqual([]);
+    expect(delta).not.toBeNull();
+    if (!delta) return;
+    expect(delta.startedPids).toEqual([]);
+    expect(delta.stoppedPids).toEqual([]);
+  });
+
+  it('does not synthesize appeared PIDs after a failed collector snapshot', () => {
+    const failed = makeSnapshot('2026-09-09T12:00:00.000Z', [], 'error');
+    const recovered = makeSnapshot('2026-09-09T12:01:00.000Z', [2660, 3460, 4268], 'detected');
+
+    expect(compareProcessSets(failed, recovered)).toBeNull();
+  });
+
+  it('does not compare process sets when either snapshot is unavailable', () => {
+    const unavailable = makeSnapshot('2026-09-09T12:00:00.000Z', [], 'unavailable');
+    const emptyValid = makeSnapshot('2026-09-09T12:01:00.000Z', [], 'none');
+
+    expect(compareProcessSets(unavailable, emptyValid)).toBeNull();
+    expect(compareProcessSets(emptyValid, unavailable)).toBeNull();
+  });
+
+  it('allows none-to-detected comparison when both scans are valid', () => {
+    const emptyValid = makeSnapshot('2026-09-09T12:00:00.000Z', [], 'none');
+    const detected = makeSnapshot('2026-09-09T12:01:00.000Z', [100, 200], 'detected');
+
+    expect(compareProcessSets(emptyValid, detected)).toEqual({
+      previousCollectedAt: emptyValid.collectedAt,
+      currentCollectedAt: detected.collectedAt,
+      startedPids: [100, 200],
+      stoppedPids: []
+    });
   });
 });
