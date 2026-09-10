@@ -6,6 +6,7 @@ import type {
   OwnedProcessEvidence,
   WindowsDiagnosticSnapshot
 } from '../../src/shared/contracts.js';
+import { classifyCollectorFailure, collectorFailureDetail } from './collector-failure.js';
 
 const execFileAsync = promisify(execFile);
 
@@ -17,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 function Normalize-Root([string]$Value) {
   if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
-  try { return ([IO.Path]::GetFullPath($Value).TrimEnd('\') + '\') } catch { return $null }
+  try { return ([IO.Path]::GetFullPath($Value).TrimEnd('\\') + '\\') } catch { return $null }
 }
 
 function Test-PathUnderRoot([string]$Candidate, [string]$Root) {
@@ -54,9 +55,9 @@ try {
 
 try {
   $registryPaths = @(
-    'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
-    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
-    'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
+    'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
+    'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
+    'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'
   )
 
   foreach ($registryPath in $registryPaths) {
@@ -297,14 +298,17 @@ export const collectWindowsDiagnostics = async (): Promise<WindowsDiagnosticSnap
         }
       ]
     };
-  } catch {
+  } catch (error) {
+    const failureKind = classifyCollectorFailure(error);
+    const failureDetail = collectorFailureDetail(failureKind, POWERSHELL_TIMEOUT_MS);
+
     return {
       source: 'windows-readonly',
       collectedAt,
       installation: {
         state: 'error',
         candidates: [],
-        detail: 'The bounded Windows discovery collector failed before valid evidence could be produced.'
+        detail: failureDetail
       },
       processes: {
         state: 'error',
@@ -313,7 +317,7 @@ export const collectWindowsDiagnostics = async (): Promise<WindowsDiagnosticSnap
       },
       activeJobState: 'unknown',
       observations: [
-        { id: 'installation', label: 'Codex installation', status: 'failed', detail: 'The read-only Windows collector failed.' },
+        { id: 'installation', label: 'Codex installation', status: 'failed', detail: failureDetail },
         { id: 'processes', label: 'Owned Codex processes', status: 'unknown', detail: 'Process ownership was not evaluated after collector failure.' },
         { id: 'active-job', label: 'Active job state', status: 'unknown', detail: 'Active task state remains unknown.' },
         { id: 'recovery', label: 'Recovery engine', status: 'unavailable', detail: 'Recovery actions remain intentionally disabled in M2.' }
