@@ -18,7 +18,7 @@ $ErrorActionPreference = 'Stop'
 
 function Normalize-Root([string]$Value) {
   if ([string]::IsNullOrWhiteSpace($Value)) { return $null }
-  try { return ([IO.Path]::GetFullPath($Value).TrimEnd('\\') + '\\') } catch { return $null }
+  try { return ([IO.Path]::GetFullPath($Value).TrimEnd('\') + '\') } catch { return $null }
 }
 
 function Test-PathUnderRoot([string]$Candidate, [string]$Root) {
@@ -55,9 +55,9 @@ try {
 
 try {
   $registryPaths = @(
-    'HKCU:\\Software\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
-    'HKLM:\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*',
-    'HKLM:\\SOFTWARE\\WOW6432Node\\Microsoft\\Windows\\CurrentVersion\\Uninstall\\*'
+    'HKCU:\Software\Microsoft\Windows\CurrentVersion\Uninstall\*',
+    'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\*',
+    'HKLM:\SOFTWARE\WOW6432Node\Microsoft\Windows\CurrentVersion\Uninstall\*'
   )
 
   foreach ($registryPath in $registryPaths) {
