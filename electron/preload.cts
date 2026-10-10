@@ -128,8 +128,9 @@ const parseSnapshotResult = (value: unknown): Result<DiagnosticSnapshot> => {
   } };
 };
 
-// Account registry (K1). Mirrors src/shared/accounts-validation.ts because a sandboxed
-// preload cannot import project modules. Keep both in sync; tests cover the shared copy.
+// Account registry (K1). Mirrors parseAccountsResult in src/shared/accounts-validation.ts
+// because a sandboxed preload cannot import project modules. Keep both in sync;
+// tests/accounts-preload-parser.test.ts runs this copy against the shared one.
 type AccountRecord = { id: string; label: string; email: string; note: string | null; createdAt: string };
 type CapacitySnapshot = {
   accountId: string; source: 'manual'; observedAt: string; recordedAt: string;
@@ -144,17 +145,29 @@ const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}
 const isoInstantPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/;
 const isUuid = (value: unknown): value is string => isString(value) && uuidPattern.test(value);
 const isIsoInstant = (value: unknown): value is string => isString(value) && isoInstantPattern.test(value) && !Number.isNaN(Date.parse(value));
-const isCalendarDate = (value: unknown): value is string => isString(value) && /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(Date.parse(`${value}T00:00:00Z`));
+const isCalendarDate = (value: unknown): value is string => {
+  const match = isString(value) ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(value) : null;
+  if (!match) return false;
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+};
 const isPercent = (value: unknown): boolean => typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 100;
 const isCount = (value: unknown): boolean => typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 99;
 const orNull = (value: unknown, guard: (candidate: unknown) => boolean): boolean => value === null || guard(value);
+const hasExactKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean =>
+  Object.keys(value).length === keys.length && keys.every((key) => Object.prototype.hasOwnProperty.call(value, key));
+const isLabel = (value: unknown): boolean => isString(value) && value.trim().length > 0 && value.trim().length <= 60;
+const isEmail = (value: unknown): boolean => isString(value) && value.trim().length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+const isNote = (value: unknown): boolean => value === null || (isString(value) && value.length <= 500);
+const capacityKeys = ['weeklyRemainingPercent', 'weeklyResetsAt', 'fiveHourRemainingPercent', 'fiveHourResetsAt', 'resetCreditsRemaining', 'subscriptionEndsOn', 'subscriptionRenewal'];
 
 const isAccountRecord = (value: unknown): value is AccountRecord =>
-  isRecord(value) && Object.keys(value).length === 5 && isUuid(value.id) && isString(value.label) && isString(value.email)
-  && isNullableString(value.note) && isIsoInstant(value.createdAt);
+  isRecord(value) && hasExactKeys(value, ['id', 'label', 'email', 'note', 'createdAt']) && isUuid(value.id) && isLabel(value.label) && isEmail(value.email)
+  && isNote(value.note) && isIsoInstant(value.createdAt);
 
 const isCapacitySnapshot = (value: unknown): value is CapacitySnapshot =>
-  isRecord(value) && Object.keys(value).length === 11 && isUuid(value.accountId) && value.source === 'manual'
+  isRecord(value) && hasExactKeys(value, ['accountId', 'source', 'observedAt', 'recordedAt', ...capacityKeys]) && isUuid(value.accountId) && value.source === 'manual'
   && isIsoInstant(value.observedAt) && isIsoInstant(value.recordedAt)
   && orNull(value.weeklyRemainingPercent, isPercent) && orNull(value.weeklyResetsAt, isIsoInstant)
   && orNull(value.fiveHourRemainingPercent, isPercent) && orNull(value.fiveHourResetsAt, isIsoInstant)
@@ -169,11 +182,17 @@ const parseAccountsResult = (value: unknown): Result<AccountsState> => {
     return { ok: false, error: { code: value.error.code, message: value.error.message } };
   }
   const data = value.data;
-  if (value.ok !== true || !isRecord(data) || data.schemaVersion !== 1 || !Array.isArray(data.accounts) || !Array.isArray(data.snapshots)) return invalid;
+  if (value.ok !== true || !isRecord(data) || !hasExactKeys(data, ['schemaVersion', 'accounts', 'reportedActiveAccountId', 'snapshots'])) return invalid;
+  if (data.schemaVersion !== 1 || !Array.isArray(data.accounts) || !Array.isArray(data.snapshots)) return invalid;
   if (!data.accounts.every(isAccountRecord) || !data.snapshots.every(isCapacitySnapshot)) return invalid;
   const ids = new Set(data.accounts.map((account) => account.id));
+  const emails = new Set(data.accounts.map((account) => account.email.trim().toLowerCase()));
+  if (ids.size !== data.accounts.length || emails.size !== data.accounts.length) return invalid;
   if (!orNull(data.reportedActiveAccountId, (id) => isUuid(id) && ids.has(id))) return invalid;
   if (!data.snapshots.every((snapshot) => ids.has(snapshot.accountId))) return invalid;
+  for (const id of ids) {
+    if (data.snapshots.filter((snapshot) => snapshot.accountId === id).length > 20) return invalid;
+  }
   return { ok: true, data: {
     schemaVersion: 1,
     accounts: data.accounts.map((account) => ({ ...account })),
