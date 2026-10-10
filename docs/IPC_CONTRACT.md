@@ -9,6 +9,9 @@ Only the context-isolated preload exposes privileged functionality. The renderer
 
 Result is a discriminated union with success data or a structured error containing a stable code and safe message. EnvironmentInfo includes Doctor version, platform, architecture and runtime versions. DiagnosticSnapshot includes `source: "mock"`, an ISO timestamp, and observations with stable identifiers, status and explanatory text.
 
+## Account registry API (K1)
+`window.doctor.accounts` exposes `getState`, `upsertAccount`, `removeAccount`, `recordManualSnapshot` and `setReportedActive`. Each returns `Result<AccountsState>`. These methods write only Doctor's own registry under Electron `userData`; they never touch Codex state. Channels, types and validation rules are specified in `docs/BUILD_SPEC_ACCOUNTS_K1.md`.
+
 ## Validation
 Validate IPC arguments and returned external data at trust boundaries. Reject unexpected values rather than coercing them into valid diagnostic states. Do not expose stack traces or sensitive paths to the renderer by default.
 
