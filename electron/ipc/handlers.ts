@@ -1,6 +1,10 @@
 import { app, ipcMain } from 'electron';
+import path from 'node:path';
+import { accountChannels } from '../../src/shared/accounts-contracts.js';
 import type { DiagnosticSnapshot, EnvironmentInfo, MockDiagnosticSnapshot, Result } from '../../src/shared/contracts.js';
+import { createRegistryStore } from '../services/accounts/registry-store.js';
 import { collectWindowsDiagnostics } from '../services/windows-diagnostics.js';
+import { createAccountHandlers } from './account-handlers.js';
 
 const ok = <T>(data: T): Result<T> => ({ ok: true, data });
 
@@ -48,4 +52,17 @@ export const registerIpcHandlers = (): void => {
   ipcMain.handle('doctor:get-diagnostic-snapshot', async (): Promise<Result<DiagnosticSnapshot>> => {
     return ok(await collectWindowsDiagnostics());
   });
+
+  registerAccountHandlers();
+};
+
+const registerAccountHandlers = (): void => {
+  // Doctor-owned data only: <userData>/accounts/registry.json.
+  const store = createRegistryStore(path.join(app.getPath('userData'), 'accounts'));
+  const handlers = createAccountHandlers(store);
+  ipcMain.handle(accountChannels.getState, () => handlers.getState());
+  ipcMain.handle(accountChannels.upsertAccount, (_event, value: unknown) => handlers.upsertAccount(value));
+  ipcMain.handle(accountChannels.removeAccount, (_event, value: unknown) => handlers.removeAccount(value));
+  ipcMain.handle(accountChannels.recordManualSnapshot, (_event, value: unknown) => handlers.recordManualSnapshot(value));
+  ipcMain.handle(accountChannels.setReportedActive, (_event, value: unknown) => handlers.setReportedActive(value));
 };

@@ -128,8 +128,91 @@ const parseSnapshotResult = (value: unknown): Result<DiagnosticSnapshot> => {
   } };
 };
 
+// Account registry (K1). Mirrors parseAccountsResult in src/shared/accounts-validation.ts
+// because a sandboxed preload cannot import project modules. Keep both in sync;
+// tests/accounts-preload-parser.test.ts runs this copy against the shared one.
+type AccountRecord = { id: string; label: string; email: string; note: string | null; createdAt: string };
+type CapacitySnapshot = {
+  accountId: string; source: 'manual'; observedAt: string; recordedAt: string;
+  weeklyRemainingPercent: number | null; weeklyResetsAt: string | null;
+  fiveHourRemainingPercent: number | null; fiveHourResetsAt: string | null;
+  resetCreditsRemaining: number | null; subscriptionEndsOn: string | null;
+  subscriptionRenewal: 'renewed' | 'pending' | 'unknown';
+};
+type AccountsState = { schemaVersion: 1; accounts: AccountRecord[]; reportedActiveAccountId: string | null; snapshots: CapacitySnapshot[] };
+
+const uuidPattern = /^[0-9a-f]{8}-[0-9a-f]{4}-[1-8][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/;
+const isoInstantPattern = /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}(:\d{2}(\.\d{1,3})?)?(Z|[+-]\d{2}:\d{2})$/;
+const isUuid = (value: unknown): value is string => isString(value) && uuidPattern.test(value);
+const isIsoInstant = (value: unknown): value is string => isString(value) && isoInstantPattern.test(value) && !Number.isNaN(Date.parse(value));
+const isCalendarDate = (value: unknown): value is string => {
+  const match = isString(value) ? /^(\d{4})-(\d{2})-(\d{2})$/.exec(value) : null;
+  if (!match) return false;
+  const [year, month, day] = [Number(match[1]), Number(match[2]), Number(match[3])];
+  const date = new Date(Date.UTC(year, month - 1, day));
+  return date.getUTCFullYear() === year && date.getUTCMonth() === month - 1 && date.getUTCDate() === day;
+};
+const isPercent = (value: unknown): boolean => typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 100;
+const isCount = (value: unknown): boolean => typeof value === 'number' && Number.isInteger(value) && value >= 0 && value <= 99;
+const orNull = (value: unknown, guard: (candidate: unknown) => boolean): boolean => value === null || guard(value);
+const hasExactKeys = (value: Record<string, unknown>, keys: readonly string[]): boolean =>
+  Object.keys(value).length === keys.length && keys.every((key) => Object.prototype.hasOwnProperty.call(value, key));
+const isLabel = (value: unknown): boolean => isString(value) && value.trim().length > 0 && value.trim().length <= 60;
+const isEmail = (value: unknown): boolean => isString(value) && value.trim().length <= 254 && /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(value.trim());
+const isNote = (value: unknown): boolean => value === null || (isString(value) && value.length <= 500);
+const capacityKeys = ['weeklyRemainingPercent', 'weeklyResetsAt', 'fiveHourRemainingPercent', 'fiveHourResetsAt', 'resetCreditsRemaining', 'subscriptionEndsOn', 'subscriptionRenewal'];
+
+const isAccountRecord = (value: unknown): value is AccountRecord =>
+  isRecord(value) && hasExactKeys(value, ['id', 'label', 'email', 'note', 'createdAt']) && isUuid(value.id) && isLabel(value.label) && isEmail(value.email)
+  && isNote(value.note) && isIsoInstant(value.createdAt);
+
+const isCapacitySnapshot = (value: unknown): value is CapacitySnapshot =>
+  isRecord(value) && hasExactKeys(value, ['accountId', 'source', 'observedAt', 'recordedAt', ...capacityKeys]) && isUuid(value.accountId) && value.source === 'manual'
+  && isIsoInstant(value.observedAt) && isIsoInstant(value.recordedAt)
+  && orNull(value.weeklyRemainingPercent, isPercent) && orNull(value.weeklyResetsAt, isIsoInstant)
+  && orNull(value.fiveHourRemainingPercent, isPercent) && orNull(value.fiveHourResetsAt, isIsoInstant)
+  && orNull(value.resetCreditsRemaining, isCount) && orNull(value.subscriptionEndsOn, isCalendarDate)
+  && (value.subscriptionRenewal === 'renewed' || value.subscriptionRenewal === 'pending' || value.subscriptionRenewal === 'unknown');
+
+const parseAccountsResult = (value: unknown): Result<AccountsState> => {
+  const invalid: Result<AccountsState> = { ok: false, error: { code: 'INVALID_ACCOUNTS_PAYLOAD', message: 'Account registry response failed validation.' } };
+  if (!isRecord(value)) return invalid;
+  if (value.ok === false) {
+    if (!isRecord(value.error) || !isString(value.error.code) || !isString(value.error.message)) return invalid;
+    return { ok: false, error: { code: value.error.code, message: value.error.message } };
+  }
+  const data = value.data;
+  if (value.ok !== true || !isRecord(data) || !hasExactKeys(data, ['schemaVersion', 'accounts', 'reportedActiveAccountId', 'snapshots'])) return invalid;
+  if (data.schemaVersion !== 1 || !Array.isArray(data.accounts) || !Array.isArray(data.snapshots)) return invalid;
+  if (!data.accounts.every(isAccountRecord) || !data.snapshots.every(isCapacitySnapshot)) return invalid;
+  const ids = new Set(data.accounts.map((account) => account.id));
+  const emails = new Set(data.accounts.map((account) => account.email.trim().toLowerCase()));
+  if (ids.size !== data.accounts.length || emails.size !== data.accounts.length) return invalid;
+  if (!orNull(data.reportedActiveAccountId, (id) => isUuid(id) && ids.has(id))) return invalid;
+  if (!data.snapshots.every((snapshot) => ids.has(snapshot.accountId))) return invalid;
+  for (const id of ids) {
+    if (data.snapshots.filter((snapshot) => snapshot.accountId === id).length > 20) return invalid;
+  }
+  return { ok: true, data: {
+    schemaVersion: 1,
+    accounts: data.accounts.map((account) => ({ ...account })),
+    reportedActiveAccountId: data.reportedActiveAccountId as string | null,
+    snapshots: data.snapshots.map((snapshot) => ({ ...snapshot }))
+  } };
+};
+
+const invokeAccounts = async (channel: string, ...args: unknown[]): Promise<Result<AccountsState>> =>
+  parseAccountsResult(await ipcRenderer.invoke(channel, ...args));
+
 contextBridge.exposeInMainWorld('doctor', {
   getEnvironment: async () => parseEnvironmentResult(await ipcRenderer.invoke('doctor:get-environment')),
   getMockSnapshot: async () => parseSnapshotResult(await ipcRenderer.invoke('doctor:get-mock-snapshot')),
-  getDiagnosticSnapshot: async () => parseSnapshotResult(await ipcRenderer.invoke('doctor:get-diagnostic-snapshot'))
+  getDiagnosticSnapshot: async () => parseSnapshotResult(await ipcRenderer.invoke('doctor:get-diagnostic-snapshot')),
+  accounts: {
+    getState: () => invokeAccounts('doctor:accounts:get-state'),
+    upsertAccount: (input: unknown) => invokeAccounts('doctor:accounts:upsert-account', input),
+    removeAccount: (accountId: unknown) => invokeAccounts('doctor:accounts:remove-account', accountId),
+    recordManualSnapshot: (input: unknown) => invokeAccounts('doctor:accounts:record-manual-snapshot', input),
+    setReportedActive: (accountId: unknown) => invokeAccounts('doctor:accounts:set-reported-active', accountId)
+  }
 });

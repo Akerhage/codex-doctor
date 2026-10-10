@@ -1,3 +1,5 @@
+import type { AccountsApi } from './accounts-contracts.js';
+
 export type DiagnosticStatus = 'healthy' | 'warning' | 'failed' | 'unknown' | 'unavailable' | 'mock';
 
 export type Result<T> =
@@ -70,4 +72,5 @@ export interface DoctorApi {
   getEnvironment(): Promise<Result<EnvironmentInfo>>;
   getMockSnapshot(): Promise<Result<MockDiagnosticSnapshot>>;
   getDiagnosticSnapshot(): Promise<Result<DiagnosticSnapshot>>;
+  accounts: AccountsApi;
 }

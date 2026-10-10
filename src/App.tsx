@@ -1,7 +1,8 @@
 import { useEffect, useMemo, useState } from 'react';
+import { AccountsPage } from './accounts/AccountsPage';
 import type { DiagnosticObservation, DiagnosticSnapshot, EnvironmentInfo, WindowsDiagnosticSnapshot } from './shared/contracts';
 
-type Page = 'dashboard' | 'diagnostics' | 'recovery' | 'settings';
+type Page = 'dashboard' | 'diagnostics' | 'accounts' | 'recovery' | 'settings';
 
 type LoadState =
   | { status: 'loading' }
@@ -18,6 +19,7 @@ type ProcessDelta = {
 const pageLabels: Record<Page, string> = {
   dashboard: 'Dashboard',
   diagnostics: 'Diagnostics',
+  accounts: 'Accounts',
   recovery: 'Recovery',
   settings: 'Settings'
 };
@@ -384,6 +386,8 @@ export function App() {
   };
 
   const content = useMemo(() => {
+    // The account registry is independent of diagnostic collection.
+    if (page === 'accounts') return <AccountsPage />;
     if (loadState.status === 'loading') {
       return <div className="state-panel">Collecting bounded read-only diagnostics…</div>;
     }
