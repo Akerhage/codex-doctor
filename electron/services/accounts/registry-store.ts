@@ -8,6 +8,8 @@ import { accountsError, emptyAccountsState } from './account-operations.js';
 
 // Doctor-owned JSON registry. It lives only in the directory the caller supplies
 // (Electron userData in production) and never touches Codex files.
+// Updates are serialized within one process only; two running Doctor instances could
+// still overwrite each other's changes.
 
 export const REGISTRY_FILE_NAME = 'registry.json';
 
@@ -22,7 +24,9 @@ export interface RegistryFileOps {
 export const nodeRegistryFileOps: RegistryFileOps = {
   readFile: (filePath) => readFile(filePath, 'utf8'),
   writeFileDurably: async (filePath, contents) => {
-    // 'wx' refuses to follow or replace an existing file at the temporary path.
+    // 'wx' refuses to follow or replace an existing file or link at the temporary path.
+    // Mode 0o600 restricts access on POSIX only. On Windows Node maps the mode to the
+    // read-only attribute, so the file inherits the ACL of the userData directory instead.
     const handle = await open(filePath, 'wx', 0o600);
     try {
       await handle.writeFile(contents, 'utf8');
