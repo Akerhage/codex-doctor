@@ -1,4 +1,4 @@
-import { mkdtemp, readdir, readFile, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import { tmpdir } from 'node:os';
 import path from 'node:path';
 import { afterEach, beforeEach, describe, expect, it } from 'vitest';
@@ -58,6 +58,58 @@ describe('createRegistryStore', () => {
     expect(result).toMatchObject({ ok: false, error: { code: 'REGISTRY_WRITE_FAILED' } });
     expect(await readFile(registryPath(), 'utf8')).toBe(before);
     expect(await readdir(directory)).toEqual([REGISTRY_FILE_NAME]);
+  });
+
+  it('reports an unreadable registry when the registry path is a directory and writes nothing', async () => {
+    await mkdir(registryPath());
+    const store = createRegistryStore(directory);
+    expect(await store.read()).toMatchObject({ ok: false, error: { code: 'REGISTRY_UNREADABLE' } });
+    expect(await store.update(addAccount('konto1@example.test', ACCOUNT_A))).toMatchObject({ ok: false, error: { code: 'REGISTRY_UNREADABLE' } });
+    expect(await readdir(directory)).toEqual([REGISTRY_FILE_NAME]);
+  });
+
+  it('removes the temporary file and keeps the registry when writing the temporary file fails', async () => {
+    await createRegistryStore(directory).update(addAccount('konto1@example.test', ACCOUNT_A));
+    const before = await readFile(registryPath(), 'utf8');
+    const failing = createRegistryStore(directory, {
+      ...nodeRegistryFileOps,
+      writeFileDurably: async (filePath, contents) => {
+        await writeFile(filePath, contents.slice(0, 10), 'utf8');
+        throw Object.assign(new Error('simulated'), { code: 'ENOSPC' });
+      }
+    });
+    expect(await failing.update((state) => setReportedActive(state, null))).toMatchObject({ ok: false, error: { code: 'REGISTRY_WRITE_FAILED' } });
+    expect(await readFile(registryPath(), 'utf8')).toBe(before);
+    expect(await readdir(directory)).toEqual([REGISTRY_FILE_NAME]);
+  });
+
+  it('never includes file paths or system error text in error messages', async () => {
+    const failing = createRegistryStore(directory, {
+      ...nodeRegistryFileOps,
+      readFile: async () => { throw Object.assign(new Error(`EACCES: permission denied, open '${registryPath()}'`), { code: 'EACCES' }); }
+    });
+    const result = await failing.read();
+    expect(result.ok).toBe(false);
+    const message = result.ok ? '' : result.error.message;
+    expect(message).not.toContain(directory);
+    expect(message).not.toContain('EACCES');
+  });
+
+  // Creating symlinks needs extra privileges on Windows, so this runs on POSIX only.
+  it.skipIf(process.platform === 'win32')('replaces a link at the registry path instead of writing through it', async () => {
+    const outside = await mkdtemp(path.join(tmpdir(), 'doctor-outside-'));
+    try {
+      const target = path.join(outside, 'target.json');
+      const original = `${JSON.stringify(baseState(), null, 2)}\n`;
+      await writeFile(target, original, 'utf8');
+      await symlink(target, registryPath());
+
+      const result = await createRegistryStore(directory).update((state) => setReportedActive(state, null));
+      expect(result.ok).toBe(true);
+      expect(await readFile(target, 'utf8')).toBe(original);
+    } finally {
+      await rm(outside, { recursive: true, force: true });
+    }
   });
 
   it('does not write when a transition is rejected', async () => {
