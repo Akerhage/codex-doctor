@@ -7,7 +7,12 @@ function StateBadge({ state }: { state: ClassifiedValue<unknown>['state'] }) {
   return <span className={`value-state value-state--${state}`}>{valueStateLabel[state]}</span>;
 }
 
-function WindowRow({ label, window }: { label: string; window: LimitWindowAssessment | null }) {
+function ReportedAge({ state, ageMs }: { state: ClassifiedValue<unknown>['state']; ageMs: number | null }) {
+  if (state === 'unknown' || ageMs === null) return null;
+  return <small className="capacity-row__age">reported {formatAge(ageMs)}</small>;
+}
+
+function WindowRow({ label, window, ageMs }: { label: string; window: LimitWindowAssessment | null; ageMs: number | null }) {
   const percent = window?.remainingPercent ?? { value: null, state: 'unknown' as const };
   const reset = window?.resetsAt ?? { value: null, state: 'unknown' as const };
   return (
@@ -16,6 +21,7 @@ function WindowRow({ label, window }: { label: string; window: LimitWindowAssess
       <dd>
         <strong>{percent.value === null ? 'Unknown' : `${percent.value} % left`}</strong>
         <StateBadge state={percent.state} />
+        <ReportedAge state={percent.state} ageMs={ageMs} />
         <small>{reset.value === null ? 'Next reset unknown' : `Resets ${formatInstant(reset.value)}`}{reset.state === 'elapsed' ? ' (passed)' : ''}</small>
       </dd>
     </div>
@@ -60,13 +66,14 @@ export function AccountCard({
       </header>
 
       <dl className="capacity-list">
-        <WindowRow label="Weekly" window={assessment?.weekly ?? null} />
-        <WindowRow label="5-hour" window={assessment?.fiveHour ?? null} />
+        <WindowRow label="Weekly" window={assessment?.weekly ?? null} ageMs={assessment?.ageMs ?? null} />
+        <WindowRow label="5-hour" window={assessment?.fiveHour ?? null} ageMs={assessment?.ageMs ?? null} />
         <div className="capacity-row">
           <dt>Manual resets</dt>
           <dd>
             <strong>{credits.value === null ? 'Unknown' : `${credits.value} left`}</strong>
             <StateBadge state={credits.state} />
+            <ReportedAge state={credits.state} ageMs={assessment?.ageMs ?? null} />
           </dd>
         </div>
         <div className="capacity-row">
@@ -81,7 +88,7 @@ export function AccountCard({
 
       <p className="account-card__provenance">
         {assessment
-          ? <>Source: manual entry · observed {formatInstant(assessment.observedAt)} ({formatAge(assessment.ageMs)})</>
+          ? <>Source: manual entry, not verified live · observed {formatInstant(assessment.observedAt)} ({formatAge(assessment.ageMs)})</>
           : <>No values reported yet. Everything is unknown.</>}
       </p>
 

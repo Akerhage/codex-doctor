@@ -37,15 +37,21 @@ describe('assessCapacity', () => {
     expect(result.weekly.resetsAt.state).toBe('elapsed');
   });
 
-  it('marks the 5-hour value outdated after five hours and the weekly value after a day', () => {
+  it('never judges a value by its age alone and reports the age instead', () => {
     const values = snapshot({ weeklyRemainingPercent: 50, fiveHourRemainingPercent: 50, resetCreditsRemaining: 1 });
-    const sixHours = assessCapacity(values, at('2026-10-10T14:00:00Z'));
-    expect(sixHours.fiveHour.remainingPercent.state).toBe('stale');
-    expect(sixHours.weekly.remainingPercent.state).toBe('known');
+    const thirtyDays = assessCapacity(values, at('2026-11-09T08:00:00Z'));
+    expect(thirtyDays.fiveHour.remainingPercent).toEqual({ value: 50, state: 'known' });
+    expect(thirtyDays.weekly.remainingPercent).toEqual({ value: 50, state: 'known' });
+    expect(thirtyDays.resetCredits).toEqual({ value: 1, state: 'known' });
+    expect(thirtyDays.ageMs).toBe(30 * 24 * 60 * 60 * 1000);
+  });
 
-    const twoDays = assessCapacity(values, at('2026-10-12T08:00:01Z'));
-    expect(twoDays.weekly.remainingPercent.state).toBe('stale');
-    expect(twoDays.resetCredits.state).toBe('stale');
+  it('only exposes the states known, unknown and elapsed', () => {
+    const result = assessCapacity(snapshot({ weeklyRemainingPercent: 5, weeklyResetsAt: '2026-10-11T08:00:00Z' }), at('2027-01-01T00:00:00Z'));
+    const states = [result.weekly.remainingPercent, result.weekly.resetsAt, result.fiveHour.remainingPercent, result.resetCredits, result.subscription.endsOn]
+      .map((entry) => entry.state);
+    expect(states.every((state) => ['known', 'unknown', 'elapsed'].includes(state))).toBe(true);
+    expect(result.weekly.remainingPercent.value).toBe(5);
   });
 
   it('flags a passed subscription date without inferring that the subscription ended', () => {

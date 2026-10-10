@@ -59,7 +59,6 @@ export const formatInstant = (iso: string): string => new Date(iso).toLocaleStri
 export const valueStateLabel: Record<ValueState, string> = {
   known: 'Reported',
   unknown: 'Unknown',
-  stale: 'Outdated',
   elapsed: 'Reset passed'
 };
 

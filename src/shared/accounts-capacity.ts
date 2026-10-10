@@ -1,19 +1,16 @@
 import type { AccountsState, CapacitySnapshot, SubscriptionRenewal } from './accounts-contracts.js';
 
 // Classifies manually reported values against the current time. It never estimates a
-// missing value and never produces a recommendation.
-
-export const WEEKLY_STALE_AFTER_MS = 24 * 60 * 60 * 1000;
-export const FIVE_HOUR_STALE_AFTER_MS = 5 * 60 * 60 * 1000;
-export const RESET_CREDITS_STALE_AFTER_MS = 24 * 60 * 60 * 1000;
+// missing value, never judges a value unusable because of its age and never produces a
+// recommendation. Age is reported separately (`ageMs`) for the user to weigh.
 
 /**
- * known    – reported and still plausible;
+ * known    – reported by the user (not verified live);
  * unknown  – not reported;
- * stale    – reported, but older than the freshness limit;
- * elapsed  – the reported reset time has passed, so the reported percentage no longer applies.
+ * elapsed  – the reported reset time or date has passed. The reported percentage is kept as
+ *            reported; Doctor does not assume the window was restored to 100 %.
  */
-export type ValueState = 'known' | 'unknown' | 'stale' | 'elapsed';
+export type ValueState = 'known' | 'unknown' | 'elapsed';
 
 export interface ClassifiedValue<T> {
   value: T | null;
@@ -40,8 +37,6 @@ export interface CapacityAssessment {
 const classifyWindow = (
   remainingPercent: number | null,
   resetsAt: string | null,
-  ageMs: number,
-  staleAfterMs: number,
   now: Date
 ): LimitWindowAssessment => {
   const resetElapsed = resetsAt !== null && Date.parse(resetsAt) <= now.getTime();
@@ -50,7 +45,6 @@ const classifyWindow = (
   let percentState: ValueState;
   if (remainingPercent === null) percentState = 'unknown';
   else if (resetElapsed) percentState = 'elapsed';
-  else if (ageMs > staleAfterMs) percentState = 'stale';
   else percentState = 'known';
 
   return {
@@ -68,9 +62,7 @@ const localDateKey = (date: Date): string => {
 export const assessCapacity = (snapshot: CapacitySnapshot, now: Date): CapacityAssessment => {
   const ageMs = Math.max(0, now.getTime() - Date.parse(snapshot.observedAt));
 
-  const resetCreditsState: ValueState = snapshot.resetCreditsRemaining === null
-    ? 'unknown'
-    : ageMs > RESET_CREDITS_STALE_AFTER_MS ? 'stale' : 'known';
+  const resetCreditsState: ValueState = snapshot.resetCreditsRemaining === null ? 'unknown' : 'known';
 
   const endsOnState: ValueState = snapshot.subscriptionEndsOn === null
     ? 'unknown'
@@ -79,8 +71,8 @@ export const assessCapacity = (snapshot: CapacitySnapshot, now: Date): CapacityA
   return {
     observedAt: snapshot.observedAt,
     ageMs,
-    weekly: classifyWindow(snapshot.weeklyRemainingPercent, snapshot.weeklyResetsAt, ageMs, WEEKLY_STALE_AFTER_MS, now),
-    fiveHour: classifyWindow(snapshot.fiveHourRemainingPercent, snapshot.fiveHourResetsAt, ageMs, FIVE_HOUR_STALE_AFTER_MS, now),
+    weekly: classifyWindow(snapshot.weeklyRemainingPercent, snapshot.weeklyResetsAt, now),
+    fiveHour: classifyWindow(snapshot.fiveHourRemainingPercent, snapshot.fiveHourResetsAt, now),
     resetCredits: { value: snapshot.resetCreditsRemaining, state: resetCreditsState },
     subscription: {
       endsOn: { value: snapshot.subscriptionEndsOn, state: endsOnState },

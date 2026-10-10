@@ -88,6 +88,10 @@
   font-size: 11px;
 }
 
+.capacity-row dd small.capacity-row__age {
+  flex-basis: auto;
+}
+
 .value-state {
   display: inline-flex;
   align-items: center;
@@ -104,7 +108,6 @@
 
 /* "Reported" is neutral: a manual value is not evidence of health. */
 .value-state--known { color: #b9d2e0; border-color: #2d4658; background: rgba(46, 82, 104, .14); }
-.value-state--stale,
 .value-state--elapsed { color: #edcb82; border-color: #5c4d2b; background: rgba(166, 126, 43, .10); }
 .value-state--active { color: var(--accent-strong); border-color: #2f6a6a; background: rgba(46, 105, 107, .12); }
 
